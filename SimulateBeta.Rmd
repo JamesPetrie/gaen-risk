@@ -1,0 +1,51 @@
+---
+title: "Beta Testing Analysis"
+output: html_notebook
+---
+
+
+```{r}
+require(data.table)
+require(ggplot2)
+
+source("~/Desktop/OptimalQuarantine/riskAnalysis/RiskScoring.R")
+```
+
+
+```{r}
+riskConfig = getRiskConfig()
+
+allTesters = 1:40
+infectedTesters = sample(allTesters, 5)
+
+dt = data.table(Tester1 = rep(infectedTesters,times = 1, each = length(allTesters)), Tester2 = rep(allTesters,times = length(infectedTesters)))
+dt = dt[Tester1 != Tester2]
+numRows = nrow(dt)
+
+# randomly log some significant contacts
+dt[, QRExposure := rbinom(numRows, size = 1, prob = 0.15)]
+
+# randomly choose some attenuation values
+dt[, Bin1 := round(rexp(numRows, rate = 1/(1 + 10*QRExposure))/5)*5]
+dt[, Bin2 := round(rexp(numRows, rate = 1/(4 + 15*QRExposure))/5)*5]
+dt[, Bin3 := round(rexp(numRows, rate = 1/(2 + 3*QRExposure))/5)*5]
+
+computeRisk = function(bin1, bin2, bin3){
+  exposureInfo = list(attenuationDurations = c(bin1,bin2,bin3), transmissionRiskLevel = 6, day = 0, ENVersion = "1.1")
+  return(computeExposureInfoRisk(exposureInfo, riskConfig))
+}
+
+dt[,Risk := computeRisk(Bin1, Bin2, Bin3), by = list(Tester1, Tester2)]
+```
+
+
+```{r}
+evalDt = data.table(ldply(seq(0, 0.1, by = 0.001), function(threshold){
+  qrDetections = nrow(dt[QRExposure == TRUE & Risk >= threshold])
+  nonQrDetections = nrow(dt[QRExposure == FALSE & Risk >= threshold])
+  return(data.table(NumDetections = c(qrDetections,nonQrDetections), Type = c("QR Contact", "Non QR Contact"), Threshold = threshold))
+}))
+
+ggplot(evalDt) + geom_line(aes(x = Threshold, y = NumDetections, colour = Type))
+```
+
